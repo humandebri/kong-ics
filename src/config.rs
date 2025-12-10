@@ -170,6 +170,13 @@ impl AppConfig {
             ("kong", e8(10_000.0)),
             ("bob", e8(100.1)),
         ];
+        
+        // アービトラージ対象ペア（symbol, token_name, ikiti）
+        let pair_specs = vec![
+            ("BOB_ICP", "bob", e8(30.0)),
+            ("KONG_ICP", "kong", e8(60.0)),
+            ("nICP_ICP", "nicp", e8(40.0)),
+        ];
 
         let approve_tokens: Vec<ApproveTokenConfig> = approve_specs
             .iter()
@@ -183,12 +190,7 @@ impl AppConfig {
             })
             .collect();
 
-        // アービトラージ対象ペア（symbol, token_name, ikiti）
-        let pair_specs = vec![
-            ("BOB_ICP", "bob", e8(30.0)),
-            ("KONG_ICP", "kong", e8(60.0)),
-            ("nICP_ICP", "nicp", e8(40.0)),
-        ];
+        
 
         let pairs: Vec<PairConfig> = pair_specs
             .iter()
@@ -227,7 +229,7 @@ impl AppConfig {
                 tokens: approve_tokens,
                 icp_canister: ICP_LEDGER_RAW.to_string(),
                 kong_canister: KONG_CANISTER.to_string(),
-                icp_amount_e8: e8(1_000.0),
+                icp_amount_e8: e8(10.0),
                 interval_secs: 100,
             },
             pairs,

@@ -10,7 +10,7 @@ use crate::config::{PairConfig, ICP_TRANSFER_FEE_E8};
 use crate::ic_client::agent::IcClient;
 use crate::ic_client::ics::{fetch_pool_snapshot as fetch_ics, IcsPoolSnapshot};
 use crate::ic_client::kong::{fetch_pool_snapshot as fetch_kong, KongPoolSnapshot};
-use crate::ic_client::swap::swap_kong;
+use crate::ic_client::swap::{swap_icps_deposit, swap_kong};
 use crate::notify::DiscordNotifier;
 
 #[derive(Debug)]
@@ -210,29 +210,27 @@ impl Trade {
                 // ICS leg 出力は SNS、Kong leg 出力は ICP
                 let min_mid = calc_min(mid_amount, sns_fee, self.min_receive_factor);
                 let min_final = calc_min(final_amount, icp_fee, self.min_receive_factor);
-                info!(
-                    "{}: min calc (IcsToKong) expected_mid {:.4} expected_final {:.4} min_mid {} min_final {} sns_fee {} icp_fee {}",
-                    self.config.symbol,
-                    mid_amount / 1e8f64,
-                    final_amount / 1e8f64,
-                    min_mid,
-                    min_final,
-                    sns_fee,
-                    icp_fee
-                );
-
-                // ICPSwap 側を一時停止（呼び出さない）
-                // let ics_call = swap_icps_deposit(
-                //     &self.client,
-                //     &self.config.icpswap_lp,
-                //     amount_in_u,
+                // デバッグ用ログ（必要になればコメントを外す）
+                // info!(
+                //     "{}: min calc (IcsToKong) expected_mid {:.4} expected_final {:.4} min_mid {} min_final {} sns_fee {} icp_fee {}",
+                //     self.config.symbol,
+                //     mid_amount / 1e8f64,
+                //     final_amount / 1e8f64,
                 //     min_mid,
-                //     false,
-                //     icp_fee,
+                //     min_final,
                 //     sns_fee,
+                //     icp_fee
                 // );
-                let ics_call =
-                    async { Ok::<String, crate::ic_client::swap::SwapError>("icpswap skipped".to_string()) };
+
+                let ics_call = swap_icps_deposit(
+                    &self.client,
+                    &self.config.icpswap_lp,
+                    amount_in_u,
+                    min_mid,
+                    false,
+                    icp_fee,
+                    sns_fee,
+                );
                 let kong_call = swap_kong(
                     &self.client,
                     &self.config.kong_canister,
@@ -259,16 +257,17 @@ impl Trade {
                 // Kong leg 出力は SNS、ICS leg 出力は ICP
                 let min_mid = calc_min(mid_amount, sns_fee, self.min_receive_factor);
                 let min_final = calc_min(final_amount, icp_fee, self.min_receive_factor);
-                info!(
-                    "{}: min calc (KongToIcs) expected_mid {:.4} expected_final {:.4} min_mid {} min_final {} sns_fee {} icp_fee {}",
-                    self.config.symbol,
-                    mid_amount / 1e8f64,
-                    final_amount / 1e8f64,
-                    min_mid,
-                    min_final,
-                    sns_fee,
-                    icp_fee
-                );
+                // デバッグ用ログ（必要になればコメントを外す）
+                // info!(
+                //     "{}: min calc (KongToIcs) expected_mid {:.4} expected_final {:.4} min_mid {} min_final {} sns_fee {} icp_fee {}",
+                //     self.config.symbol,
+                //     mid_amount / 1e8f64,
+                //     final_amount / 1e8f64,
+                //     min_mid,
+                //     _min_final,
+                //     sns_fee,
+                //     icp_fee
+                // );
 
                 let kong_call = swap_kong(
                     &self.client,
@@ -278,19 +277,16 @@ impl Trade {
                     amount_in_u,
                     min_mid,
                 );
-                // ICPSwap 側を一時停止（呼び出さない）
-                // let ics_call = swap_icps_deposit(
-                //     &self.client,
-                //     &self.config.icpswap_lp,
-                //     min_mid,
-                //     min_final,
-                //     true,
-                //     // Kong leg 出力は ICP なので out_fee は icp_fee
-                //     sns_fee,
-                //     icp_fee,
-                // );
-                let ics_call =
-                    async { Ok::<String, crate::ic_client::swap::SwapError>("icpswap skipped".to_string()) };
+                let ics_call = swap_icps_deposit(
+                    &self.client,
+                    &self.config.icpswap_lp,
+                    min_mid,
+                    min_final,
+                    true,
+                    // Kong leg 出力は ICP なので out_fee は icp_fee
+                    sns_fee,
+                    icp_fee,
+                );
                 let (kong_res, ics_res) = tokio::join!(kong_call, ics_call);
                 let mut errs = Vec::new();
                 match kong_res {

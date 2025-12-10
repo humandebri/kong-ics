@@ -120,13 +120,21 @@ impl Trade {
         let fee = self.fee_rate;
         let (kekka, direction, output_a, output_b) = if result < 0f64 {
             let output_icpswap = swap_icp_to_ckusdc(result_abs, ics.token1_k, ics.token0_k, fee);
-            let output_kong =
-                kong_quote_const_prod(output_icpswap, &kong, KongDirection::SnsToIcp);
+            let output_kong = kong_quote_const_prod(
+                output_icpswap,
+                &kong,
+                KongDirection::SnsToIcp,
+                ICP_TRANSFER_FEE_E8,
+            );
             let delta = output_kong - result_abs;
             (delta, SwapDirection::IcsToKong, output_icpswap, output_kong)
         } else {
-            let output_kong =
-                kong_quote_const_prod(result_abs, &kong, KongDirection::IcpToSns);
+            let output_kong = kong_quote_const_prod(
+                result_abs,
+                &kong,
+                KongDirection::IcpToSns,
+                self.config.sns_fee_e8,
+            );
             let output_icpswap = swap_icp_to_ckusdc(output_kong, ics.token0_k, ics.token1_k, fee);
             let delta = output_icpswap - result_abs;
             (delta, SwapDirection::KongToIcs, output_kong, output_icpswap)
@@ -339,36 +347,45 @@ enum KongDirection {
     SnsToIcp,
 }
 
-/// Kong の独自計算: リザーブに LP fee を加え、x*y=k 形式で out を計算
-fn kong_quote_const_prod(amount_in: f64, pool: &KongPoolSnapshot, dir: KongDirection) -> f64 {
-    let fee_rate = (10_000u32.saturating_sub(pool.lp_fee_bps) as f64) / 10_000f64;
-    let amount_eff = amount_in * fee_rate;
+/// Kong の独自計算: LP fee を含めた定数積を整数で計算し、出力トークンの transfer fee を控除
+fn kong_quote_const_prod(
+    amount_in: f64,
+    pool: &KongPoolSnapshot,
+    dir: KongDirection,
+    out_fee_e8: u128,
+) -> f64 {
+    let in_u = amount_in.round() as u128;
+    let fee_bps = pool.lp_fee_bps as u128;
+    let amount_eff = in_u.saturating_mul(10_000 - fee_bps) / 10_000;
 
-    // R0 = SNS, R1 = ICP
-    let r_sns = pool.sns_balance + pool.sns_lp_fee;
-    let r_icp = pool.icp_balance + pool.icp_lp_fee;
-    let k = r_sns * r_icp;
+    // R0 = SNS, R1 = ICP (raw e8)
+    let r_sns = pool.sns_raw.saturating_add(pool.sns_lp_raw);
+    let r_icp = pool.icp_raw.saturating_add(pool.icp_lp_raw);
+    let k = r_sns.saturating_mul(r_icp);
 
-    match dir {
+    let mut out = match dir {
         KongDirection::IcpToSns => {
-            // ICP 入力なので R1 が増える
-            let r1_new = r_icp + amount_eff;
-            if r1_new == 0f64 {
-                return 0f64;
+            let r1_new = r_icp.saturating_add(amount_eff);
+            if r1_new == 0 {
+                0
+            } else {
+                let r0_new = k / r1_new;
+                r_sns.saturating_sub(r0_new)
             }
-            let r0_new = k / r1_new;
-            (r_sns - r0_new).max(0f64)
         }
         KongDirection::SnsToIcp => {
-            // SNS 入力なので R0 が増える
-            let r0_new = r_sns + amount_eff;
-            if r0_new == 0f64 {
-                return 0f64;
+            let r0_new = r_sns.saturating_add(amount_eff);
+            if r0_new == 0 {
+                0
+            } else {
+                let r1_new = k / r0_new;
+                r_icp.saturating_sub(r1_new)
             }
-            let r1_new = k / r0_new;
-            (r_icp - r1_new).max(0f64)
         }
-    }
+    };
+
+    out = out.saturating_sub(out_fee_e8);
+    out as f64
 }
 
 pub fn cal_amount(dex1_token0: f64, dex1_token1: f64, dex2_token0: f64, dex2_token1: f64) -> f64 {

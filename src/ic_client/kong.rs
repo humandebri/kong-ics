@@ -4,7 +4,6 @@
 
 use candid::types::Label;
 use candid::{types::value::IDLField, types::value::IDLValue, Encode, IDLArgs, Nat};
-use tracing::info;
 use thiserror::Error;
 
 use super::agent::IcClient;
@@ -15,6 +14,10 @@ pub struct KongPoolSnapshot {
     pub sns_balance: f64,
     pub icp_lp_fee: f64,
     pub sns_lp_fee: f64,
+    pub icp_raw: u128,
+    pub sns_raw: u128,
+    pub icp_lp_raw: u128,
+    pub sns_lp_raw: u128,
     pub price_icp_per_sns: f64,
     pub lp_fee_bps: u32,
 }
@@ -41,12 +44,6 @@ pub async fn fetch_pool_snapshot(
         .query_raw(kong_canister, "pools", args)
         .await
         .map_err(|e| KongError::Client(e.to_string()))?;
-
-    // デバッグ用: レスポンスをデコードして出力
-    let decoded = IDLArgs::from_bytes(&raw)
-        .map(|v| v.to_string())
-        .unwrap_or_else(|e| format!("decode err: {}", e));
-    info!("kong pools decoded: {}", decoded);
 
     parse_pools(&raw, ticker)
 }
@@ -104,6 +101,10 @@ fn parse_pools(raw: &[u8], ticker: &str) -> Result<KongPoolSnapshot, KongError> 
     let icp_f = nat_to_f64(&icp)?;
     let sns_lp_fee_f = nat_to_f64(&sns_lp_fee)?;
     let icp_lp_fee_f = nat_to_f64(&icp_lp_fee)?;
+    let sns_raw = nat_to_u128(&sns)?;
+    let icp_raw = nat_to_u128(&icp)?;
+    let sns_lp_raw = nat_to_u128(&sns_lp_fee)?;
+    let icp_lp_raw = nat_to_u128(&icp_lp_fee)?;
     let lp_fee_bps = lp_fee_bps_nat
         .0
         .to_string()
@@ -115,6 +116,10 @@ fn parse_pools(raw: &[u8], ticker: &str) -> Result<KongPoolSnapshot, KongError> 
         sns_balance: sns_f,
         icp_lp_fee: icp_lp_fee_f,
         sns_lp_fee: sns_lp_fee_f,
+        icp_raw,
+        sns_raw,
+        icp_lp_raw,
+        sns_lp_raw,
         price_icp_per_sns,
         lp_fee_bps,
     })
@@ -136,9 +141,14 @@ fn extract_text_any(entries: &[IDLField], ids: &[u32]) -> Option<String> {
 fn extract_nat(entries: &[IDLField], id: u32) -> Option<Nat> {
     for field in entries {
         if field.id == Label::Id(id) {
-            if let IDLValue::Nat(n) = &field.val {
-                return Some(n.clone());
-            }
+            return match &field.val {
+                IDLValue::Nat(n) => Some(n.clone()),
+                IDLValue::Nat8(v) => Some(Nat::from(*v)),
+                IDLValue::Nat16(v) => Some(Nat::from(*v)),
+                IDLValue::Nat32(v) => Some(Nat::from(*v)),
+                IDLValue::Nat64(v) => Some(Nat::from(*v)),
+                _ => None,
+            };
         }
     }
     None
@@ -147,6 +157,12 @@ fn extract_nat(entries: &[IDLField], id: u32) -> Option<Nat> {
 fn nat_to_f64(n: &Nat) -> Result<f64, KongError> {
     let s = n.0.to_string();
     s.parse::<f64>()
+        .map_err(|e| KongError::Decode(e.to_string()))
+}
+
+fn nat_to_u128(n: &Nat) -> Result<u128, KongError> {
+    n.0.to_string()
+        .parse::<u128>()
         .map_err(|e| KongError::Decode(e.to_string()))
 }
 

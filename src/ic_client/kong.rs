@@ -13,6 +13,10 @@ use super::agent::IcClient;
 pub struct KongPoolSnapshot {
     pub icp_balance: f64,
     pub sns_balance: f64,
+    pub icp_lp_fee: f64,
+    pub sns_lp_fee: f64,
+    pub price_icp_per_sns: f64,
+    pub lp_fee_bps: u32,
 }
 
 #[derive(Debug, Error)]
@@ -87,13 +91,32 @@ fn parse_pools(raw: &[u8], ticker: &str) -> Result<KongPoolSnapshot, KongError> 
 
     let sns = extract_nat(entry_record, 1_476_685_581u32).ok_or(KongError::MissingFields)?;
     let icp = extract_nat(entry_record, 1_476_685_582u32).ok_or(KongError::MissingFields)?;
+    let sns_lp_fee =
+        extract_nat(entry_record, 1_283_592_060u32).ok_or(KongError::MissingFields)?;
+    let icp_lp_fee =
+        extract_nat(entry_record, 1_283_592_061u32).ok_or(KongError::MissingFields)?;
+    let price_icp_per_sns =
+        extract_float(entry_record, 3_364_572_809u32).ok_or(KongError::MissingFields)?;
+    let lp_fee_bps_nat =
+        extract_nat(entry_record, 4_243_077_425u32).ok_or(KongError::MissingFields)?;
 
     let sns_f = nat_to_f64(&sns)?;
     let icp_f = nat_to_f64(&icp)?;
+    let sns_lp_fee_f = nat_to_f64(&sns_lp_fee)?;
+    let icp_lp_fee_f = nat_to_f64(&icp_lp_fee)?;
+    let lp_fee_bps = lp_fee_bps_nat
+        .0
+        .to_string()
+        .parse::<u32>()
+        .map_err(|e| KongError::Decode(e.to_string()))?;
 
     Ok(KongPoolSnapshot {
         icp_balance: icp_f,
         sns_balance: sns_f,
+        icp_lp_fee: icp_lp_fee_f,
+        sns_lp_fee: sns_lp_fee_f,
+        price_icp_per_sns,
+        lp_fee_bps,
     })
 }
 
@@ -125,4 +148,15 @@ fn nat_to_f64(n: &Nat) -> Result<f64, KongError> {
     let s = n.0.to_string();
     s.parse::<f64>()
         .map_err(|e| KongError::Decode(e.to_string()))
+}
+
+fn extract_float(entries: &[IDLField], id: u32) -> Option<f64> {
+    for field in entries {
+        if field.id == Label::Id(id) {
+            if let IDLValue::Float64(v) = &field.val {
+                return Some(*v);
+            }
+        }
+    }
+    None
 }

@@ -4,6 +4,7 @@
 
 use candid::types::Label;
 use candid::{types::value::IDLField, types::value::IDLValue, Encode, IDLArgs, Nat};
+use tracing::info;
 use thiserror::Error;
 
 use super::agent::IcClient;
@@ -33,6 +34,12 @@ pub async fn fetch_pool_snapshot(
         .query_raw(canister, "metadata", args)
         .await
         .map_err(|e| IcsError::Client(e.to_string()))?;
+
+    // デバッグ用: レスポンスをデコードして出力
+    let decoded = IDLArgs::from_bytes(&raw)
+        .map(|v| v.to_string())
+        .unwrap_or_else(|e| format!("decode err: {}", e));
+    info!("ics metadata decoded: {}", decoded);
 
     parse_metadata(&raw)
 }

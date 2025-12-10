@@ -9,7 +9,7 @@ use tracing::{info, warn};
 use crate::config::{PairConfig, ICP_TRANSFER_FEE_E8};
 use crate::ic_client::agent::IcClient;
 use crate::ic_client::ics::{fetch_pool_snapshot as fetch_ics, IcsPoolSnapshot};
-use crate::ic_client::kong::{fetch__snapshot as fetch_kong, KongPoolSnapshot};
+use crate::ic_client::kong::{fetch_pool_snapshot as fetch_kong, KongPoolSnapshot};
 use crate::ic_client::swap::swap_kong;
 use crate::notify::DiscordNotifier;
 
@@ -121,12 +121,12 @@ impl Trade {
         let (kekka, direction, output_a, output_b) = if result < 0f64 {
             let output_icpswap = swap_icp_to_ckusdc(result_abs, ics.token1_k, ics.token0_k, fee);
             let output_kong =
-                swap_icp_to_ckusdc(output_icpswap, kong.sns_balance, kong.icp_balance, fee);
+                kong_quote_const_prod(output_icpswap, &kong, KongDirection::SnsToIcp);
             let delta = output_kong - result_abs;
             (delta, SwapDirection::IcsToKong, output_icpswap, output_kong)
         } else {
             let output_kong =
-                swap_icp_to_ckusdc(result_abs, kong.icp_balance, kong.sns_balance, fee);
+                kong_quote_const_prod(result_abs, &kong, KongDirection::IcpToSns);
             let output_icpswap = swap_icp_to_ckusdc(output_kong, ics.token0_k, ics.token1_k, fee);
             let delta = output_icpswap - result_abs;
             (delta, SwapDirection::KongToIcs, output_kong, output_icpswap)
@@ -331,6 +331,44 @@ pub fn swap_icp_to_ckusdc(amount: f64, token0: f64, token1: f64, fee_rate: f64) 
     // Uniswap v2 形式: out = (amount_in*(1-fee) * reserve_out) / (reserve_in + amount_in*(1-fee))
     let amount_in_after_fee = amount * (1f64 - fee_rate);
     (amount_in_after_fee * token1) / (token0 + amount_in_after_fee)
+}
+
+#[derive(Debug, Clone, Copy)]
+enum KongDirection {
+    IcpToSns,
+    SnsToIcp,
+}
+
+/// Kong の独自計算: リザーブに LP fee を加え、x*y=k 形式で out を計算
+fn kong_quote_const_prod(amount_in: f64, pool: &KongPoolSnapshot, dir: KongDirection) -> f64 {
+    let fee_rate = (10_000u32.saturating_sub(pool.lp_fee_bps) as f64) / 10_000f64;
+    let amount_eff = amount_in * fee_rate;
+
+    // R0 = SNS, R1 = ICP
+    let r_sns = pool.sns_balance + pool.sns_lp_fee;
+    let r_icp = pool.icp_balance + pool.icp_lp_fee;
+    let k = r_sns * r_icp;
+
+    match dir {
+        KongDirection::IcpToSns => {
+            // ICP 入力なので R1 が増える
+            let r1_new = r_icp + amount_eff;
+            if r1_new == 0f64 {
+                return 0f64;
+            }
+            let r0_new = k / r1_new;
+            (r_sns - r0_new).max(0f64)
+        }
+        KongDirection::SnsToIcp => {
+            // SNS 入力なので R0 が増える
+            let r0_new = r_sns + amount_eff;
+            if r0_new == 0f64 {
+                return 0f64;
+            }
+            let r1_new = k / r0_new;
+            (r_icp - r1_new).max(0f64)
+        }
+    }
 }
 
 pub fn cal_amount(dex1_token0: f64, dex1_token1: f64, dex2_token0: f64, dex2_token1: f64) -> f64 {

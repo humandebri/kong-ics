@@ -2,3 +2,5 @@ target/
 **/*.pem
 **/infinity_identity.pem
 Cargo.lock
+.env
+.env

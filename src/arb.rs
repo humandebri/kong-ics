@@ -187,15 +187,32 @@ impl Trade {
         final_amount: f64,
         direction: SwapDirection,
     ) -> Result<(), TradeError> {
-        // min_receive_factor を最低受取に設定
-        let min_mid = (mid_amount * self.min_receive_factor).round() as u128;
-        let min_final = (final_amount * self.min_receive_factor).round() as u128;
+        // 期待値から transfer fee を差し引き、min_receive_factor を掛けた最終最小受取を算出
+        fn calc_min(expected_out: f64, out_fee_e8: u128, factor: f64) -> u128 {
+            let after_fee = (expected_out - out_fee_e8 as f64).max(0f64);
+            (after_fee * factor).floor() as u128
+        }
+
         let amount_in_u = amount_in.round() as u128;
         let sns_fee = self.config.sns_fee_e8;
         let icp_fee = ICP_TRANSFER_FEE_E8;
 
         match direction {
             SwapDirection::IcsToKong => {
+                // ICS leg 出力は SNS、Kong leg 出力は ICP
+                let min_mid = calc_min(mid_amount, sns_fee, self.min_receive_factor);
+                let min_final = calc_min(final_amount, icp_fee, self.min_receive_factor);
+                info!(
+                    "{}: min calc (IcsToKong) expected_mid {:.4} expected_final {:.4} min_mid {} min_final {} sns_fee {} icp_fee {}",
+                    self.config.symbol,
+                    mid_amount / 1e8f64,
+                    final_amount / 1e8f64,
+                    min_mid,
+                    min_final,
+                    sns_fee,
+                    icp_fee
+                );
+
                 let ics_call = swap_icps_deposit(
                     &self.client,
                     &self.config.icpswap_lp,
@@ -228,6 +245,20 @@ impl Trade {
                 }
             }
             SwapDirection::KongToIcs => {
+                // Kong leg 出力は SNS、ICS leg 出力は ICP
+                let min_mid = calc_min(mid_amount, sns_fee, self.min_receive_factor);
+                let min_final = calc_min(final_amount, icp_fee, self.min_receive_factor);
+                info!(
+                    "{}: min calc (KongToIcs) expected_mid {:.4} expected_final {:.4} min_mid {} min_final {} sns_fee {} icp_fee {}",
+                    self.config.symbol,
+                    mid_amount / 1e8f64,
+                    final_amount / 1e8f64,
+                    min_mid,
+                    min_final,
+                    sns_fee,
+                    icp_fee
+                );
+
                 let kong_call = swap_kong(
                     &self.client,
                     &self.config.kong_canister,
@@ -242,6 +273,7 @@ impl Trade {
                     min_mid,
                     min_final,
                     true,
+                    // Kong leg 出力は ICP なので out_fee は icp_fee
                     sns_fee,
                     icp_fee,
                 );

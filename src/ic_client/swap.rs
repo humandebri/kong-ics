@@ -65,7 +65,7 @@ pub async fn swap_kong(
     }
     let decoded = decoded_args.to_string();
     if is_err {
-        Err(SwapError::Swap(err_msg))
+        Err(SwapError::Swap(format!("{} | decoded={}", err_msg, decoded)))
     } else {
         Ok(decoded)
     }

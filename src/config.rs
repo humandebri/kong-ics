@@ -176,7 +176,7 @@ impl AppConfig {
             |name: &str| -> Option<&TokenDefinition> { tokens.iter().find(|t| t.name == name) };
 
         // 承認用しきい値
-        let approve_specs = vec![("kong", e8(10_000.0)), ("bob", e8(100.1))];
+        let approve_specs = vec![("kong", e8(10_000.0)), ("bob", e8(400.1))];
 
         // アービトラージ対象ペア（symbol, token_name, ikiti）
         let pair_specs = vec![("BOB_ICP", "bob", e8(10.0)), ("KONG_ICP", "kong", e8(10.0))];

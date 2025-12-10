@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use candid::{Encode, Principal};
+use candid::{Encode, IDLArgs, Principal};
 use kong_ics::config::AppConfig;
 use kong_ics::ic_client::agent::IcClient;
 use kong_ics::identity::load_identity;
@@ -127,23 +127,26 @@ async fn check_and_approve(
     match query_allowance(client, token_canister, owner, spender_canister).await {
         Ok(current) => {
             info!(
-                "[{} -> {}] allowance: {} (target {})",
+                "token:{} -> to:{} | allowance:{} target:{}",
                 token_label, spender_label, current, target_allowance
             );
             if current < (target_allowance as f64 * 0.9) as u128 {
                 info!(
-                    "[{} -> {}] approve 更新: {}",
+                    "token:{} -> to:{} | approve send: {}",
                     token_label, spender_label, target_allowance
                 );
                 if let Err(e) =
                     send_approve(client, token_canister, spender_canister, target_allowance).await
                 {
-                    warn!("[{} -> {}] approve 失敗: {}", token_label, spender_label, e);
+                    warn!(
+                        "token:{} -> to:{} | approve failed: {}",
+                        token_label, spender_label, e
+                    );
                 }
             }
         }
         Err(e) => warn!(
-            "[{} -> {}] allowance 取得失敗: {}",
+            "token:{} -> to:{} | allowance err: {}",
             token_label, spender_label, e
         ),
     }
@@ -246,9 +249,12 @@ async fn send_approve(
         .await
         .map_err(|e| e.to_string())?;
 
+    let decoded = IDLArgs::from_bytes(&raw)
+        .map(|v| v.to_string())
+        .unwrap_or_else(|e| format!("decode err: {}", e));
     info!(
-        "approve response ({} -> {}): {:?}",
-        token_canister, spender_canister, raw
+        "approve response ({} -> {}): decoded={} raw_bytes={:?}",
+        token_canister, spender_canister, decoded, raw
     );
     Ok(())
 }

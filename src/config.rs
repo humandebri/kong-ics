@@ -5,6 +5,15 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 
+const ICP_LEDGER_RAW: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
+const ICP_LEDGER_IC: &str = "IC.ryjl3-tyaaa-aaaaa-aaaba-cai";
+const KONG_CANISTER: &str = "2ipq2-uqaaa-aaaar-qailq-cai";
+
+fn e8(amount: f64) -> u128 {
+    // 小数を許容しつつ e8 精度に丸める
+    (amount * 1e8f64).round() as u128
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkConfig {
     pub api_url: String,
@@ -25,6 +34,30 @@ pub struct LineNotifyConfig {
 pub struct DiscordWebhookConfig {
     /// .env に定義するキー名（例: DISCORD_WEBHOOK_URL）
     pub env_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenDefinition {
+    pub name: String,
+    pub icpswap_lp: String,
+    pub sns_canister: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApproveTokenConfig {
+    pub name: String,
+    pub icpswap: String,
+    pub sns: String,
+    pub sns_threshold_e8: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApproveConfig {
+    pub tokens: Vec<ApproveTokenConfig>,
+    pub icp_canister: String,
+    pub kong_canister: String,
+    pub icp_amount_e8: u128,
+    pub interval_secs: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,7 +88,9 @@ pub struct AppConfig {
     pub identity: IdentityConfig,
     pub line: LineNotifyConfig,
     pub discord: DiscordWebhookConfig,
+    pub tokens: Vec<TokenDefinition>,
     pub trade: TradeParams,
+    pub approve: ApproveConfig,
     pub pairs: Vec<PairConfig>,
 }
 
@@ -82,6 +117,93 @@ impl AppConfig {
             .ok()
             .unwrap_or_else(|| "DISCORD_WEBHOOK_URL".to_string());
 
+        // トークン定義を一元化
+        let tokens = vec![
+            TokenDefinition {
+                name: "bob".to_string(),
+                icpswap_lp: "ybilh-nqaaa-aaaag-qkhzq-cai".to_string(),
+                sns_canister: "7pail-xaaaa-aaaas-aabmq-cai".to_string(),
+            },
+            TokenDefinition {
+                name: "kong".to_string(),
+                icpswap_lp: "ye4fx-gqaaa-aaaag-qnara-cai".to_string(),
+                sns_canister: "o7oak-iyaaa-aaaaq-aadzq-cai".to_string(),
+            },
+            TokenDefinition {
+                name: "nicp".to_string(),
+                icpswap_lp: "e5a7x-pqaaa-aaaag-qkcga-cai".to_string(),
+                sns_canister: "buwm7-7yaaa-aaaar-qagva-cai".to_string(),
+            },
+            TokenDefinition {
+                name: "usdc".to_string(),
+                icpswap_lp: "mohjv-bqaaa-aaaag-qjyia-cai".to_string(),
+                sns_canister: "xevnm-gaaaa-aaaar-qafnq-cai".to_string(),
+            },
+            TokenDefinition {
+                name: "usdt".to_string(),
+                icpswap_lp: "hkstf-6iaaa-aaaag-qkcoq-cai".to_string(),
+                sns_canister: "cngnf-vqaaa-aaaar-qag4q-cai".to_string(),
+            },
+            TokenDefinition {
+                name: "dkp".to_string(),
+                icpswap_lp: "ijd5l-jyaaa-aaaag-qdjga-cai".to_string(),
+                sns_canister: "zfcdd-tqaaa-aaaaq-aaaga-cai".to_string(),
+            },
+            TokenDefinition {
+                name: "exe".to_string(),
+                icpswap_lp: "dlfvj-eqaaa-aaaag-qcs3a-cai".to_string(),
+                sns_canister: "rh2pm-ryaaa-aaaan-qeniq-cai".to_string(),
+            },
+            TokenDefinition {
+                name: "panda".to_string(),
+                icpswap_lp: "5fq4w-lyaaa-aaaag-qjqta-cai".to_string(),
+                sns_canister: "druyg-tyaaa-aaaaq-aactq-cai".to_string(),
+            },
+        ];
+
+        let find_token =
+            |name: &str| -> Option<&TokenDefinition> { tokens.iter().find(|t| t.name == name) };
+
+        // 承認用しきい値
+        let approve_specs = vec![
+            ("nicp", e8(100.1)),
+            ("kong", e8(10_000.0)),
+            ("bob", e8(100.1)),
+        ];
+
+        let approve_tokens: Vec<ApproveTokenConfig> = approve_specs
+            .iter()
+            .filter_map(|(name, threshold)| {
+                find_token(name).map(|t| ApproveTokenConfig {
+                    name: t.name.clone(),
+                    icpswap: t.icpswap_lp.clone(),
+                    sns: t.sns_canister.clone(),
+                    sns_threshold_e8: *threshold,
+                })
+            })
+            .collect();
+
+        // アービトラージ対象ペア（symbol, token_name, ikiti）
+        let pair_specs = vec![
+            ("BOB_ICP", "bob", e8(30.0)),
+            ("KONG_ICP", "kong", e8(60.0)),
+            ("nICP_ICP", "nicp", e8(40.0)),
+        ];
+
+        let pairs: Vec<PairConfig> = pair_specs
+            .iter()
+            .filter_map(|(symbol, token_name, ikiti)| {
+                find_token(token_name).map(|t| PairConfig {
+                    token_icp: ICP_LEDGER_IC.to_string(),
+                    token_sns: t.sns_canister.clone(),
+                    kong_canister: KONG_CANISTER.to_string(),
+                    icpswap_lp: t.icpswap_lp.clone(),
+                    symbol: symbol.to_string(),
+                    ikiti_e8: *ikiti,
+                })
+            })
+            .collect();
+
         AppConfig {
             network: NetworkConfig {
                 api_url: "https://icp-api.io".to_string(),
@@ -94,54 +216,21 @@ impl AppConfig {
             discord: DiscordWebhookConfig {
                 env_key: discord_env_key,
             },
+            tokens,
             trade: TradeParams {
                 fee_rate,
                 min_receive_factor,
                 profit_threshold_e8,
                 loop_interval_ms,
             },
-            pairs: vec![
-                PairConfig {
-                    token_icp: "IC.ryjl3-tyaaa-aaaaa-aaaba-cai".to_string(),
-                    token_sns: "IC.7pail-xaaaa-aaaas-aabmq-cai".to_string(),
-                    kong_canister: "2ipq2-uqaaa-aaaar-qailq-cai".to_string(),
-                    icpswap_lp: "ybilh-nqaaa-aaaag-qkhzq-cai".to_string(),
-                    symbol: "BOB_ICP".to_string(),
-                    ikiti_e8: 30_000_000_000,
-                },
-                PairConfig {
-                    token_icp: "IC.ryjl3-tyaaa-aaaaa-aaaba-cai".to_string(),
-                    token_sns: "IC.2ouva-viaaa-aaaaq-aaamq-cai".to_string(),
-                    kong_canister: "2ipq2-uqaaa-aaaar-qailq-cai".to_string(),
-                    icpswap_lp: "ne2vj-6yaaa-aaaag-qb3ia-cai".to_string(),
-                    symbol: "CHAT_ICP".to_string(),
-                    ikiti_e8: 50_000_000_000,
-                },
-                PairConfig {
-                    token_icp: "IC.ryjl3-tyaaa-aaaaa-aaaba-cai".to_string(),
-                    token_sns: "IC.o7oak-iyaaa-aaaaq-aadzq-cai".to_string(),
-                    kong_canister: "2ipq2-uqaaa-aaaar-qailq-cai".to_string(),
-                    icpswap_lp: "ye4fx-gqaaa-aaaag-qnara-cai".to_string(),
-                    symbol: "KONG_ICP".to_string(),
-                    ikiti_e8: 60_000_000_000,
-                },
-                PairConfig {
-                    token_icp: "IC.ryjl3-tyaaa-aaaaa-aaaba-cai".to_string(),
-                    token_sns: "IC.jcmow-hyaaa-aaaaq-aadlq-cai".to_string(),
-                    kong_canister: "2ipq2-uqaaa-aaaar-qailq-cai".to_string(),
-                    icpswap_lp: "oqn67-kaaaa-aaaag-qj72q-cai".to_string(),
-                    symbol: "WTN_ICP".to_string(),
-                    ikiti_e8: 30_000_000_000,
-                },
-                PairConfig {
-                    token_icp: "IC.ryjl3-tyaaa-aaaaa-aaaba-cai".to_string(),
-                    token_sns: "IC.buwm7-7yaaa-aaaar-qagva-cai".to_string(),
-                    kong_canister: "2ipq2-uqaaa-aaaar-qailq-cai".to_string(),
-                    icpswap_lp: "e5a7x-pqaaa-aaaag-qkcga-cai".to_string(),
-                    symbol: "nICP_ICP".to_string(),
-                    ikiti_e8: 40_000_000_000,
-                },
-            ],
+            approve: ApproveConfig {
+                tokens: approve_tokens,
+                icp_canister: ICP_LEDGER_RAW.to_string(),
+                kong_canister: KONG_CANISTER.to_string(),
+                icp_amount_e8: e8(1_000.0),
+                interval_secs: 100,
+            },
+            pairs,
         }
     }
 }

@@ -93,9 +93,8 @@ impl Trade {
     }
 
     pub async fn tick(&self) -> Result<(), TradeError> {
-        // Kong/ICS を順次更新（シンプルさ優先）
-        self.update_kong_cache().await;
-        self.update_ics_cache().await;
+        // Kong/ICS を並列更新
+        tokio::join!(self.update_kong_cache(), self.update_ics_cache());
 
         let kong_cache = { self.kong_cache.read().await.clone() };
         let ics_cache = { self.ics_cache.read().await.clone() };

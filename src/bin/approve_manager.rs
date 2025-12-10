@@ -67,6 +67,7 @@ async fn main() {
                 token.sns_threshold_e8,
                 &token.name,
                 "kong",
+                notifier.as_ref(),
             )
             .await;
 
@@ -79,6 +80,7 @@ async fn main() {
                 token.sns_threshold_e8,
                 &token.name,
                 "icpswap",
+                notifier.as_ref(),
             )
             .await;
 
@@ -91,6 +93,7 @@ async fn main() {
                 cfg.approve.icp_amount_e8,
                 "icp",
                 &token.name,
+                notifier.as_ref(),
             )
             .await;
         }
@@ -104,12 +107,9 @@ async fn main() {
             cfg.approve.icp_amount_e8,
             "icp",
             "kong",
+            notifier.as_ref(),
         )
         .await;
-
-        if let Some(notifier) = &notifier {
-            let _ = notifier.notify("approve_manager: チェック完了").await;
-        }
 
         sleep(Duration::from_secs(cfg.approve.interval_secs)).await;
     }
@@ -123,6 +123,7 @@ async fn check_and_approve(
     target_allowance: u128,
     token_label: &str,
     spender_label: &str,
+    notifier: Option<&DiscordNotifier>,
 ) {
     match query_allowance(client, token_canister, owner, spender_canister).await {
         Ok(current) => {
@@ -135,13 +136,24 @@ async fn check_and_approve(
                     "token:{} -> to:{} | approve send: {}",
                     token_label, spender_label, target_allowance
                 );
-                if let Err(e) =
-                    send_approve(client, token_canister, spender_canister, target_allowance).await
+                match send_approve(client, token_canister, spender_canister, target_allowance).await
                 {
-                    warn!(
-                        "token:{} -> to:{} | approve failed: {}",
-                        token_label, spender_label, e
-                    );
+                    Ok(()) => {
+                        if let Some(n) = notifier {
+                            let _ = n
+                                .notify(&format!(
+                                    "approve sent: token:{} -> to:{} amount:{}",
+                                    token_label, spender_label, target_allowance
+                                ))
+                                .await;
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            "token:{} -> to:{} | approve failed: {}",
+                            token_label, spender_label, e
+                        );
+                    }
                 }
             }
         }

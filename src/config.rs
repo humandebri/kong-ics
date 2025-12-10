@@ -5,9 +5,10 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 
-const ICP_LEDGER_RAW: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
-const ICP_LEDGER_IC: &str = "IC.ryjl3-tyaaa-aaaaa-aaaba-cai";
-const KONG_CANISTER: &str = "2ipq2-uqaaa-aaaar-qailq-cai";
+pub const ICP_LEDGER_RAW: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
+pub const ICP_LEDGER_IC: &str = "IC.ryjl3-tyaaa-aaaaa-aaaba-cai";
+pub const KONG_CANISTER: &str = "2ipq2-uqaaa-aaaar-qailq-cai";
+pub const ICP_TRANSFER_FEE_E8: u128 = 10_000;
 
 fn e8(amount: f64) -> u128 {
     // 小数を許容しつつ e8 精度に丸める
@@ -41,6 +42,7 @@ pub struct TokenDefinition {
     pub name: String,
     pub icpswap_lp: String,
     pub sns_canister: String,
+    pub transfer_fee_e8: u128,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,6 +70,7 @@ pub struct PairConfig {
     pub icpswap_lp: String,
     pub symbol: String,
     pub ikiti_e8: u128,
+    pub sns_fee_e8: u128,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,41 +126,49 @@ impl AppConfig {
                 name: "bob".to_string(),
                 icpswap_lp: "ybilh-nqaaa-aaaag-qkhzq-cai".to_string(),
                 sns_canister: "7pail-xaaaa-aaaas-aabmq-cai".to_string(),
+                transfer_fee_e8: 1_000_000,
             },
             TokenDefinition {
                 name: "kong".to_string(),
                 icpswap_lp: "ye4fx-gqaaa-aaaag-qnara-cai".to_string(),
                 sns_canister: "o7oak-iyaaa-aaaaq-aadzq-cai".to_string(),
+                transfer_fee_e8: 10_000,
             },
             TokenDefinition {
                 name: "nicp".to_string(),
                 icpswap_lp: "e5a7x-pqaaa-aaaag-qkcga-cai".to_string(),
                 sns_canister: "buwm7-7yaaa-aaaar-qagva-cai".to_string(),
+                transfer_fee_e8: 1_000_000,
             },
             TokenDefinition {
                 name: "usdc".to_string(),
                 icpswap_lp: "mohjv-bqaaa-aaaag-qjyia-cai".to_string(),
                 sns_canister: "xevnm-gaaaa-aaaar-qafnq-cai".to_string(),
+                transfer_fee_e8: 10_000,
             },
             TokenDefinition {
                 name: "usdt".to_string(),
                 icpswap_lp: "hkstf-6iaaa-aaaag-qkcoq-cai".to_string(),
                 sns_canister: "cngnf-vqaaa-aaaar-qag4q-cai".to_string(),
+                transfer_fee_e8: 10_000,
             },
             TokenDefinition {
                 name: "dkp".to_string(),
                 icpswap_lp: "ijd5l-jyaaa-aaaag-qdjga-cai".to_string(),
                 sns_canister: "zfcdd-tqaaa-aaaaq-aaaga-cai".to_string(),
+                transfer_fee_e8: 100_000,
             },
             TokenDefinition {
                 name: "exe".to_string(),
                 icpswap_lp: "dlfvj-eqaaa-aaaag-qcs3a-cai".to_string(),
                 sns_canister: "rh2pm-ryaaa-aaaan-qeniq-cai".to_string(),
+                transfer_fee_e8: 100_000,
             },
             TokenDefinition {
                 name: "panda".to_string(),
                 icpswap_lp: "5fq4w-lyaaa-aaaag-qjqta-cai".to_string(),
                 sns_canister: "druyg-tyaaa-aaaaq-aactq-cai".to_string(),
+                transfer_fee_e8: 10_000,
             },
         ];
 
@@ -168,7 +179,7 @@ impl AppConfig {
         let approve_specs = vec![("kong", e8(10_000.0)), ("bob", e8(100.1))];
 
         // アービトラージ対象ペア（symbol, token_name, ikiti）
-        let pair_specs = vec![("BOB_ICP", "bob", e8(30.0)), ("KONG_ICP", "kong", e8(60.0))];
+        let pair_specs = vec![("BOB_ICP", "bob", e8(10.0)), ("KONG_ICP", "kong", e8(10.0))];
 
         let approve_tokens: Vec<ApproveTokenConfig> = approve_specs
             .iter()
@@ -192,6 +203,7 @@ impl AppConfig {
                     icpswap_lp: t.icpswap_lp.clone(),
                     symbol: symbol.to_string(),
                     ikiti_e8: *ikiti,
+                    sns_fee_e8: t.transfer_fee_e8,
                 })
             })
             .collect();

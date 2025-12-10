@@ -6,11 +6,11 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-use crate::config::PairConfig;
+use crate::config::{PairConfig, ICP_TRANSFER_FEE_E8};
 use crate::ic_client::agent::IcClient;
 use crate::ic_client::ics::{fetch_pool_snapshot as fetch_ics, IcsPoolSnapshot};
 use crate::ic_client::kong::{fetch_pool_snapshot as fetch_kong, KongPoolSnapshot};
-use crate::ic_client::swap::{swap_icps, swap_kong};
+use crate::ic_client::swap::{swap_icps_deposit, swap_kong};
 use crate::notify::DiscordNotifier;
 
 #[derive(Debug)]
@@ -132,15 +132,32 @@ impl Trade {
             (delta, SwapDirection::KongToIcs, output_kong, output_icpswap)
         };
 
-        info!(
-            "{}: check result_abs {:.4} ICP, output_a {:.4} ICP, output_b {:.4} ICP, profit {:.4} ICP, dir={:?}",
-            self.config.symbol,
-            result_abs / 1e8f64,
-            output_a / 1e8f64,
-            output_b / 1e8f64,
-            kekka / 1e8f64,
-            direction
-        );
+        // 方向に応じて中間トークンが SNS になるので名称を明示
+        let mid_token = &self.config.token_sns;
+        match direction {
+            SwapDirection::IcsToKong => {
+                info!(
+                    "{}: dir=IcsToKong in_icp {:.4} mid_sns({}) {:.4} out_icp {:.4} profit {:.4} ICP",
+                    self.config.symbol,
+                    result_abs / 1e8f64,
+                    mid_token,
+                    output_a / 1e8f64,
+                    output_b / 1e8f64,
+                    kekka / 1e8f64
+                );
+            }
+            SwapDirection::KongToIcs => {
+                info!(
+                    "{}: dir=KongToIcs in_icp {:.4} mid_sns({}) {:.4} out_icp {:.4} profit {:.4} ICP",
+                    self.config.symbol,
+                    result_abs / 1e8f64,
+                    mid_token,
+                    output_a / 1e8f64,
+                    output_b / 1e8f64,
+                    kekka / 1e8f64
+                );
+            }
+        }
 
         if kekka > self.profit_threshold_e8 {
             info!(
@@ -174,15 +191,19 @@ impl Trade {
         let min_mid = (mid_amount * self.min_receive_factor).round() as u128;
         let min_final = (final_amount * self.min_receive_factor).round() as u128;
         let amount_in_u = amount_in.round() as u128;
+        let sns_fee = self.config.sns_fee_e8;
+        let icp_fee = ICP_TRANSFER_FEE_E8;
 
         match direction {
             SwapDirection::IcsToKong => {
-                let ics_call = swap_icps(
+                let ics_call = swap_icps_deposit(
                     &self.client,
                     &self.config.icpswap_lp,
                     amount_in_u,
                     min_mid,
                     false,
+                    icp_fee,
+                    sns_fee,
                 );
                 let kong_call = swap_kong(
                     &self.client,
@@ -193,11 +214,17 @@ impl Trade {
                     min_final,
                 );
                 let (ics_res, kong_res) = tokio::join!(ics_call, kong_call);
-                if let Err(e) = ics_res {
-                    return Err(TradeError::Client(format!("swap_icps: {}", e)));
+                let mut errs = Vec::new();
+                match ics_res {
+                    Ok(val) => info!("{}: swap_icps ok decoded={}", self.config.symbol, val),
+                    Err(e) => errs.push(format!("swap_icps: {}", e)),
                 }
-                if let Err(e) = kong_res {
-                    return Err(TradeError::Client(format!("swap_kong: {}", e)));
+                match kong_res {
+                    Ok(val) => info!("{}: swap_kong ok decoded={}", self.config.symbol, val),
+                    Err(e) => errs.push(format!("swap_kong: {}", e)),
+                }
+                if !errs.is_empty() {
+                    return Err(TradeError::Client(errs.join(" | ")));
                 }
             }
             SwapDirection::KongToIcs => {
@@ -209,19 +236,27 @@ impl Trade {
                     amount_in_u,
                     min_mid,
                 );
-                let ics_call = swap_icps(
+                let ics_call = swap_icps_deposit(
                     &self.client,
                     &self.config.icpswap_lp,
                     min_mid,
                     min_final,
                     true,
+                    sns_fee,
+                    icp_fee,
                 );
                 let (kong_res, ics_res) = tokio::join!(kong_call, ics_call);
-                if let Err(e) = kong_res {
-                    return Err(TradeError::Client(format!("swap_kong: {}", e)));
+                let mut errs = Vec::new();
+                match kong_res {
+                    Ok(val) => info!("{}: swap_kong ok decoded={}", self.config.symbol, val),
+                    Err(e) => errs.push(format!("swap_kong: {}", e)),
                 }
-                if let Err(e) = ics_res {
-                    return Err(TradeError::Client(format!("swap_icps: {}", e)));
+                match ics_res {
+                    Ok(val) => info!("{}: swap_icps ok decoded={}", self.config.symbol, val),
+                    Err(e) => errs.push(format!("swap_icps: {}", e)),
+                }
+                if !errs.is_empty() {
+                    return Err(TradeError::Client(errs.join(" | ")));
                 }
             }
         }
@@ -255,8 +290,9 @@ enum SwapDirection {
 // --- 計算ロジック ---
 
 pub fn swap_icp_to_ckusdc(amount: f64, token0: f64, token1: f64, fee_rate: f64) -> f64 {
-    let numerator = token1 / (amount + token0);
-    (numerator * amount) * (1f64 - fee_rate)
+    // Uniswap v2 形式: out = (amount_in*(1-fee) * reserve_out) / (reserve_in + amount_in*(1-fee))
+    let amount_in_after_fee = amount * (1f64 - fee_rate);
+    (amount_in_after_fee * token1) / (token0 + amount_in_after_fee)
 }
 
 pub fn cal_amount(dex1_token0: f64, dex1_token1: f64, dex2_token0: f64, dex2_token1: f64) -> f64 {

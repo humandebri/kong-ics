@@ -141,31 +141,32 @@ impl Trade {
         };
 
         // 方向に応じて中間トークンが SNS になるので名称を明示
-        let mid_token = &self.config.token_sns;
-        match direction {
-            SwapDirection::IcsToKong => {
-                info!(
-                    "{}: dir=IcsToKong in_icp {:.4} mid_sns({}) {:.4} out_icp {:.4} profit {:.4} ICP",
-                    self.config.symbol,
-                    result_abs / 1e8f64,
-                    mid_token,
-                    output_a / 1e8f64,
-                    output_b / 1e8f64,
-                    kekka / 1e8f64
-                );
-            }
-            SwapDirection::KongToIcs => {
-                info!(
-                    "{}: dir=KongToIcs in_icp {:.4} mid_sns({}) {:.4} out_icp {:.4} profit {:.4} ICP",
-                    self.config.symbol,
-                    result_abs / 1e8f64,
-                    mid_token,
-                    output_a / 1e8f64,
-                    output_b / 1e8f64,
-                    kekka / 1e8f64
-                );
-            }
-        }
+        let _mid_token = &self.config.token_sns;
+        // 経路ログ（必要ならコメントを外す）
+        // match direction {
+        //     SwapDirection::IcsToKong => {
+        //         info!(
+        //             "{}: dir=IcsToKong in_icp {:.4} mid_sns({}) {:.4} out_icp {:.4} profit {:.4} ICP",
+        //             self.config.symbol,
+        //             result_abs / 1e8f64,
+        //             mid_token,
+        //             output_a / 1e8f64,
+        //             output_b / 1e8f64,
+        //             kekka / 1e8f64
+        //         );
+        //     }
+        //     SwapDirection::KongToIcs => {
+        //         info!(
+        //             "{}: dir=KongToIcs in_icp {:.4} mid_sns({}) {:.4} out_icp {:.4} profit {:.4} ICP",
+        //             self.config.symbol,
+        //             result_abs / 1e8f64,
+        //             mid_token,
+        //             output_a / 1e8f64,
+        //             output_b / 1e8f64,
+        //             kekka / 1e8f64
+        //         );
+        //     }
+        // }
 
         if kekka > self.profit_threshold_e8 {
             info!(
@@ -176,14 +177,16 @@ impl Trade {
             );
             self.execute_swaps(result_abs, output_a, output_b, direction)
                 .await?;
-        } else {
-            info!(
-                "{}: 利益しきい値未達 (profit {:.4} ICP, threshold {:.4} ICP)",
-                self.config.symbol,
-                kekka / 1e8f64,
-                self.profit_threshold_e8 / 1e8f64
-            );
         }
+        // しきい値未達ログ（必要ならコメントを外す）
+        // else {
+        //     info!(
+        //         "{}: 利益しきい値未達 (profit {:.4} ICP, threshold {:.4} ICP)",
+        //         self.config.symbol,
+        //         kekka / 1e8f64,
+        //         self.profit_threshold_e8 / 1e8f64
+        //     );
+        // }
 
         Ok(())
     }
